@@ -1,0 +1,15 @@
+vacancy migration barrier of every POPS committee member against its elastic constants (7_cij_vs_barrier.py): x from cij_members.csv (stress–strain at the member's own a0), barrier from neb_pops.npz (member's CI-NEB from the mean band, cell at A0); r Pearson, rho Spearman; slope in meV per unit of x
+committee   x      n    x mean    x std  E_m mean E_m std       r     rho      slope
+MACE        a0   100    4.0534   0.0075     662.5    58.6  -0.100  -0.080       -780
+MACE        C11  100  110.2470   9.2560     662.5    58.6  +0.692  +0.665       4.38
+MACE        C12  100   56.4538   4.0312     662.5    58.6  +0.365  +0.326        5.3
+MACE        C44  100   29.9120   4.8925     662.5    58.6  +0.423  +0.367       5.07
+MACE        B    100   74.3849   5.4424     662.5    58.6  +0.573  +0.545       6.16
+MACE        reference model: a0 4.0523 Å, C11 110.8, C12 56.3, C44 29.9, B 74.5 GPa; barrier 659.3 meV
+constrained a0   100    4.0320   0.0000     637.4    38.5  +0.130  +0.097   9.18e+07
+constrained C11  100  116.4163   0.0112     637.4    38.5  -0.066  -0.017       -229
+constrained C12  100   64.7496   0.0009     637.4    38.5  +0.295  +0.253   1.24e+04
+constrained C44  100   30.9344   0.0009     637.4    38.5  -0.130  -0.155  -5.52e+03
+constrained B    100   81.9718   0.0036     637.4    38.5  -0.018  +0.037       -196
+constrained reference model: a0 4.0320 Å, C11 116.4, C12 64.7, C44 30.9, B 82.0 GPa; barrier 615.7 meV
+(with n = 100 members, |r| above about 0.2 is significant at the 5 % level; E_m in meV)

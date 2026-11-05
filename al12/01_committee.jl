@@ -1,0 +1,152 @@
+# [PORT] constrained-pops-repro al12/01_committee.jl: a copy of constrained_optimization/al12/01_committee_ncell4_densek.jl from
+#        physics-informed-priors-repro (457087f), paths redirected to this repository (outputs under $OUT, models via model_dir).
+# Stage 1 of the Al_12 chain: the constrained mean model — a_eq pinned (b′·θ = 0), Born-stable, phonon-repaired by cutting
+# planes until every band-path mode is above 0.15 THz — and the 30-member repaired forest (5 top-leverage, 10 top-residual,
+# 15 random observations), which al12/03 and al12/04 read.  Also builds the 4×4×4 undotted per-basis Hessian cache beside
+# the model (lib/bandpath.jl) that every later Al_12 stage loads.
+# Run:  julia --project -t 20 al12/01_committee.jl      Out: $OUT/al12/committee/{theta_mean,committee_repaired,committee_rejection}.csv
+
+include(joinpath(@__DIR__, "..", "lib", "bandpath.jl"))  # [PORT] lib/bandpath.jl
+using SparseArrays, OSQP, Random
+RHO_INTERVAL = parse(Int, get(ENV, "RHO_INTERVAL", "25"))
+
+Random.seed!(1234)
+
+element        = :Al
+dataset        = ""            
+a_experimental = nothing       
+N_cell_fc      = 4                         
+N_per_seg      = [20, 20, 20, 20, 60]      
+cut_margin_THz = 0.15
+n_lev, n_res, n_rand = 5, 10, 15
+max_cuts       = 40
+test_stride    = 10
+
+result     = load_model(element, 12, 4, 6, 2; dataset_name=dataset)
+model      = result.model; lin_params = result.lin_params; n_params = length(lin_params)
+P = result.P; Ap = Diagonal(result.W)*result.A/P; Yw = result.W.*result.Y; λ = 1.0/size(Ap,1)
+ROUT   = get(ENV, "OUT", normpath(joinpath(@__DIR__, "..", "repro", "saved")))  
+outdir = get(ENV, "OUTDIR", "$ROUT/al12/committee"); mkpath(outdir)  
+@printf("Model %s: %d params, %d threads.  Outputs → %s\n", result.name, n_params, Threads.nthreads(), outdir)
+
+# ── reference geometry, Born + a_eq rows ─────────────────────────────────────
+a_mean = ACEWorkflow.relax_lattice_constant(model, element)
+a_eq   = isnothing(a_experimental) ? a_mean : a_experimental
+@printf("a_mean = %.5f Å;  reference a_eq = %.5f Å%s\n", a_mean, a_eq, isnothing(a_experimental) ? "" : "  (experimental)")
+sys0 = ACEWorkflow.Elasticity.reference_system(element; a=a_eq)
+L0   = ustrip.(ACEWorkflow.Elasticity.lattice_matrix(sys0.cell.cell_vectors)); eV_to_GPa = 160.2176621/abs(det(L0))
+H_el = elastic_hessian_basis(model; element=element, a=a_eq)
+c11_0 = reshape(H_el,36,n_params)[1,:]; c12_0 = reshape(H_el,36,n_params)[7,:]; c44_0 = reshape(H_el,36,n_params)[22,:]
+born(θ) = (dot(c11_0,θ)*eV_to_GPa, dot(c12_0,θ)*eV_to_GPa, dot(c44_0,θ)*eV_to_GPa)
+lattice_basis(a) = ustrip.(u"eV", ACEpotentials.Models.potential_energy_basis(ACEWorkflow.Elasticity.reference_system(element; a=a), model))
+b_prime        = ForwardDiff.derivative(lattice_basis, a_eq)
+b_double_prime = ForwardDiff.derivative(a -> ForwardDiff.derivative(lattice_basis, a), a_eq)
+born_rows  = vcat(c44_0', (c11_0.-c12_0)', (c11_0.+2 .*c12_0)', b_double_prime')
+born_lower = [0.1, 1.0, 0.1, 1e-9]
+
+# ── Stage 0: undotted Hessian (once) → band-path D_k(q) over the FULL path ───
+bp = bandpath_Dk(result, model, element, a_eq, N_cell_fc; N_per_seg=N_per_seg)
+ω2_cut = (cut_margin_THz / FREQ_THz)^2
+let fm = bands(lin_params, bp)
+    @printf("Undotted band-path, mean model: ω ∈ [%.3f, %.3f] THz\n", minimum(fm), maximum(fm))
+end
+
+# ── Stage 1: constrain a_eq (mean fit) + leverage/residual forest ────────────
+C = Symmetric(Ap'*Ap .+ λ.*(P'*P)); Cf = cholesky(C)
+AtX = Cf\Matrix(Ap'); θ̃ = Cf\(Ap'*Yw)
+leverage = vec(sum(Ap'.*AtX; dims=1)); residual = Yw .- Ap*θ̃
+forest_member(i) = lin_params .+ (P \ (AtX[:, i] .* (residual[i]/leverage[i])))
+Hqp = sparse(Ap'*Ap .+ λ.*(P'*P)); qqp = -(Ap'*Yw); osqp = OSQP.Model()
+function constrain_member(i, extra_rows, extra_lower)
+    rows = vcat(born_rows, extra_rows); lowers = vcat(born_lower, extra_lower)
+    A_full = vcat(sparse(Ap[i,:]'), sparse(b_prime'/P), sparse(rows/P))
+    l = vcat([Yw[i]],[0.0],lowers); u = vcat([Yw[i]],[0.0],fill(Inf,length(lowers)))
+    OSQP.setup!(osqp; P=Hqp, q=qqp, A=A_full, l=l, u=u, max_iter=4_000_000, check_termination=25, verbose=false, eps_abs=1e-6, eps_rel=1e-6, adaptive_rho_interval=RHO_INTERVAL)   # [REPRO] pinned rho schedule
+    r = OSQP.solve!(osqp); return P \ r.x, r.info.status
+end
+function mean_fit(extra_rows=zeros(0,n_params), extra_lower=Float64[])   # b′=0, Born + extra
+    rows = vcat(born_rows, extra_rows); lowers = vcat(born_lower, extra_lower)
+    A_full = vcat(sparse(b_prime'/P), sparse(rows/P))
+    l = vcat([0.0],lowers); u = vcat([0.0],fill(Inf,length(lowers)))
+    OSQP.setup!(osqp; P=Hqp, q=qqp, A=A_full, l=l, u=u, max_iter=4_000_000, check_termination=25, verbose=false, eps_abs=1e-6, eps_rel=1e-6, adaptive_rho_interval=RHO_INTERVAL)   # [REPRO] pinned rho schedule
+    return P \ OSQP.solve!(osqp).x
+end
+# the MEAN must obey the same phonon constraints as the committee — sweep & cut it too
+θ_mean = mean_fit(); mean_er = zeros(0,n_params); mean_el = Float64[]; mean_cuts = 0
+for it in 0:max_cuts
+    global θ_mean, mean_er, mean_el, mean_cuts
+    soft = soft_modes(θ_mean, bp, ω2_cut); isempty(soft) && break
+    for (iq,e) in soft; mean_er = vcat(mean_er, cut_row(iq,e,bp)'); push!(mean_el, ω2_cut); end
+    mean_cuts += length(soft); θ_mean = mean_fit(mean_er, mean_el)
+end
+min_freq_stable(θ_mean, bp) >= cut_margin_THz - 1e-6 || @warn "mean model still soft after $mean_cuts cuts"
+@printf("Constrained mean (%d phonon cuts): C11=%.1f C12=%.1f C44=%.1f GPa, b′·θ=%.1e, min ω=%.3f THz\n",
+        mean_cuts, born(θ_mean)..., dot(b_prime, θ_mean), min_freq_stable(θ_mean, bp))
+
+lev_idx = sortperm(leverage; rev=true)[1:n_lev]
+res_idx = Int[]; for i in sortperm(abs.(residual); rev=true); i in lev_idx && continue; push!(res_idx,i); length(res_idx)==n_res && break; end
+taken = Set(vcat(lev_idx,res_idx)); rand_idx = Int[]
+while length(rand_idx) < n_rand; i = rand(1:length(Yw)); (i in taken) && continue; push!(rand_idx,i); push!(taken,i); end
+selected = vcat(lev_idx, res_idx, rand_idx)
+
+# ── Stages 2+3: a_eq-constrain each member, phonon-check, constrain naughty ──
+println("\n── a_eq-constrain + phonon-repair the proposal cloud ───────")
+committee = Vector{Vector{Float64}}(undef, length(selected)); n_cuts = zeros(Int, length(selected))
+naive = [forest_member(i) for i in selected]
+for (k, i) in enumerate(selected)
+    extra_rows = zeros(0, n_params); extra_lower = Float64[]
+    θ, _ = constrain_member(i, extra_rows, extra_lower)
+    for it in 0:max_cuts
+        soft = soft_modes(θ, bp, ω2_cut)
+        isempty(soft) && break
+        it == max_cuts && (@warn "obs $i hit max_cuts (min ω=$(round(min_freq_stable(θ,bp);digits=3)))"; break)
+        for (iq, e) in soft; extra_rows = vcat(extra_rows, cut_row(iq, e, bp)'); push!(extra_lower, ω2_cut); end
+        n_cuts[k] += length(soft)
+        θ, _ = constrain_member(i, extra_rows, extra_lower)
+    end
+    committee[k] = θ
+end
+@printf("Repaired (≥1 cut): %d / %d\n", count(>(0), n_cuts), length(selected))
+
+# ── Stage 4: rejection sample, band-path phonon check as the predicate ──────
+println("── Rejection sample committee (phonon check = predicate) ───")
+con_deltas = reduce(hcat, committee)' .- θ_mean'
+hyp_eig, hyp_bound = hypercube(Matrix(con_deltas)); K_ref = dot(θ_mean, b_double_prime)
+n_ck = Ref(0); n_ph = Ref(0)
+predicate = θ -> begin
+    n_ck[] += 1
+    all(born_lower .<= born_rows*θ) || return false
+    abs(dot(b_prime, θ .- θ_mean)/K_ref) <= 0.1 || return false
+    n_ph[] += 1
+    min_freq_stable(θ, bp) >= cut_margin_THz - 1e-6
+end
+rej_mat, _ = rejection_sample_hypercube(hyp_eig, hyp_bound, θ_mean, predicate;
+                                        number_of_committee_members=length(selected), max_attempts=2_000_000)
+@printf("  funnel: %d drawn → %d past Born/a_eq → %d accepted (%.1f%%)\n", n_ck[], n_ph[], length(selected), 100*length(selected)/n_ck[])
+rej_committee = [rej_mat[:, i] for i in 1:size(rej_mat, 2)]
+writedlm("$outdir/committee_rejection.csv", rej_mat', ',')
+writedlm("$outdir/committee_repaired.csv", reduce(hcat, committee)', ',')
+writedlm("$outdir/theta_mean.csv", θ_mean, ',')          # phonon-repaired constrained mean
+
+# ── Stage 5: verify (non-acoustic band-path minimum) ────────────────────────
+minf_rej   = [min_freq_stable(θ, bp) for θ in rej_committee]
+minf_naive = [min_freq_stable(θ, bp) for θ in naive]
+@printf("\n  rejection committee: min band ω ∈ [%.3f, %.3f] THz — %d/%d unstable\n",
+        minimum(minf_rej), maximum(minf_rej), count(<(-0.05), minf_rej), length(minf_rej))
+@printf("  naive POPS         : min band ω ∈ [%.3f, %.3f] THz — %d/%d unstable\n",
+        minimum(minf_naive), maximum(minf_naive), count(<(-0.05), minf_naive), length(minf_naive))
+
+# ── Stage 6: propagate to phonons (Γ-correct plots) + coverage ──────────────
+plot_committee_bands(rej_committee, θ_mean,     bp, "$(result.name) — constrained committee (band-path, a_eq-fixed)", "$outdir/bands_constrained.png")
+plot_committee_bands(naive,         lin_params, bp, "$(result.name) — naive POPS committee", "$outdir/bands_naive.png")
+
+println("\n── Test-set coverage (constrained committee) ───────────────")
+pr = committee_predictions(model, rej_committee, "data/Al/manual_df_test_Al.xyz"; stride=test_stride, point_params=θ_mean)
+let ev = mean((pr.tE.<pr.loE).|(pr.tE.>pr.hiE))
+    @printf("  energy RMSE=%.4g eV, coverage=%.1f%% (EV %.1f%%)\n", sqrt(mean((pr.pE.-pr.tE).^2)), (1-ev)*100, ev*100)
+end
+ACEpotentials.Models.set_linear_parameters!(model, lin_params)
+println("\n══ RESULT ══════════════════════════════════════════════════")
+@printf("  constrained committee: %d/%d phonon-unstable | naive: %d/%d\n",
+        count(<(-0.05), minf_rej), length(minf_rej), count(<(-0.05), minf_naive), length(minf_naive))
+println("All outputs → $outdir/")

@@ -1,0 +1,9 @@
+migration barriers at A0 = 4.0320 Å, 3³ cubic cell, 7-image CI-NEB; every member re-relaxes endpoints and band from the mean model's path (FMAX 0.005); 'frozen' = members on the mean band
+defect       model          mean   relaxed mean±σ         min–max    frozen mean±σ    n conv   ok
+vacancy      MACE          659.3    662.5 ±  58.6   495.5– 817.7    666.1 ±  58.8  100  100  100
+vacancy      constrained   615.7    637.4 ±  38.5   528.9– 721.7    638.8 ±  38.6  100  100  100
+interstitial MACE          130.8    131.7 ±  11.1    96.7– 163.2    132.7 ±  11.0  100  100  100
+interstitial constrained   124.2    126.8 ±  11.4   101.3– 160.0    127.6 ±  11.1  100  100  100
+vacancy      constrained − MACE: -43.6 meV; relaxed σ MACE 58.6, constrained 38.5 meV
+interstitial constrained − MACE: -6.7 meV; relaxed σ MACE 11.1, constrained 11.4 meV
+(mean: the mean model's barrier; n: members collected; conv: NEB converged; ok: endpoints kept the expected defect, always true for the vacancy; energies meV)
