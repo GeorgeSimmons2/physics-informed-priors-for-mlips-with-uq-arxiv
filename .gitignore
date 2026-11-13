@@ -1,0 +1,8 @@
+results/
+models_refit/
+models/*/hessian_cache/
+.venv/
+__pycache__/
+LocalPreferences.toml
+# too large for GitHub (247 MB, 1.9 GB): rebuild with `bash run.sh fit`
+models/*/A.csv
