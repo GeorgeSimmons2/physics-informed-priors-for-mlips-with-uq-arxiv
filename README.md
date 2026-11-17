@@ -54,7 +54,8 @@ constant in closed form: `al16_1` samples its hypercube with and without the pho
 runs 200 K NPT molecular dynamics with either parameter vector and computes its RDF; `3` computes each model's
 bands at the lattice constant it reached.
 
-**Figure 3** (`scripts/fig3_mace_elastic/`).  `1` writes MACE's readout as a regression problem; `2` refits the 81
+**Figure 3** (`scripts/fig3_mace_elastic/`).  `1a` and `1b` write MACE's readout as a regression problem (two
+processes on purpose: see the header of `1b`); `2` refits the 81
 readout weights subject to C11, C12, C44 and zero pressure at a0 = 4.032 Å; `3` and `4` build the POPS clouds and
 100-member committees of the constrained and unconstrained readout; `5` computes every member's lattice and
 elastic constants.

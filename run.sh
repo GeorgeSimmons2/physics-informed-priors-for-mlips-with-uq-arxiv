@@ -5,6 +5,7 @@
 #   bash run.sh plots     the four figures from the published results → results/              (minutes, no SLURM)
 #   bash run.sh all       every stage, from the fitted models in models/ → results/           (SLURM, about a day)
 #   bash run.sh fig1 | fig2 | fig3 | fig4        the stages of one figure                     (SLURM)
+#   bash run.sh mace      fig3 and then fig4 (fig4 uses fig3's committees)                   (SLURM)
 #   bash run.sh check     compare results/ with published/
 #   bash run.sh fit       refit both ACE models from the DFT data → models_refit/           (SLURM, a few hours)
 #   bash run.sh fit-here  the same on this machine, in the background (NPROCS workers, default 32)
@@ -49,7 +50,7 @@ fig2() {   # RLS against constrained RLS at 200 K
 
 fig3() {   # lattice and elastic constants of the constrained MACE readout and its POPS committee
     local E="THREADS=16,OMP_NUM_THREADS=16" m c s S=scripts/fig3_mace_elastic
-    m=$(sub fig3_readout ""        16 2000  12:00:00 "$E" "$PY $S/1_readout_rows.py && $JL $S/2_constrained_readout.jl")
+    m=$(sub fig3_readout ""        16 2000  12:00:00 "$E" "$PY $S/1a_constraint_rows.py && $PY $S/1b_training_rows.py && $JL $S/2_constrained_readout.jl")
     c=$(sub fig3_clouds "$m"       16 2000  06:00:00 "$E" "$JL $T $S/3_pops_clouds.jl")
     s=$(sub fig3_committees "$c"    4 2000  02:00:00 "$E" "$JL $S/4_committees.jl")
     sub fig3_cij "$s"              16 2000  06:00:00 "$E" "$PY $S/5_cij_members.py && $PY $S/6_plot.py"
@@ -78,6 +79,11 @@ fig2) fig2 ;;
 fig3) fig3 ;;
 fig4) fig4 ;;
 all)  fig1; fig2; fig4 "$(fig3)" ;;
+mace) fig4 "$(fig3)" ;;
+fig4-split)   # three more NEB jobs for members 25-99; run only once the mean bands exist (results/fig4/bands/*_mean.npz)
+    for r in 25-49 50-74 75-99; do
+        sub "fig4_neb_$r" "" 16 2000 24:00:00 "THREADS=16,OMP_NUM_THREADS=16,MEMBERS=$r" "$PY scripts/fig4_migration_barriers/1_neb.py"
+    done ;;
 check) "$PY" scripts/check_against_published.py ;;
 fit)   sub fit_ace "" 16 8000 06:00:00 "NPROCS=16" "$JL scripts/fit_ace_models.jl" ;;
 fit-here)
@@ -86,5 +92,5 @@ fit-here)
     NPROCS=${NPROCS:-32} OPENBLAS_NUM_THREADS=8 nohup $JL scripts/fit_ace_models.jl > "$LOG/fit_ace_here.log" 2>&1 &
     echo "refit started in the background (pid $!); follow it with: tail -f results/logs/fit_ace_here.log"
     ;;
-*)    sed -n 2,15p "$0"; exit 1 ;;
+*)    sed -n 2,16p "$0"; exit 1 ;;
 esac

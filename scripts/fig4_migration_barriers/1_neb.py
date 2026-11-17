@@ -31,6 +31,10 @@ load = lambda *parts: np.loadtxt(mr.input_file(*parts), delimiter=",")
 theta = {"unconstrained": mr.Basis(mr.load_calc()).theta0, "constrained": load("fig3", "theta_constrained.csv").ravel()}
 committee = {name: load("fig3", f"committee_{name}.csv")[:N_MEMBERS] for name in MODELS}
 calcs = {name: mr.load_calc() for name in MODELS}
+mr.set_theta(calcs["constrained"], theta["constrained"])
+for name in MODELS:                                  # also the first evaluations of each model in this process:
+    a, _ = mr.relaxed_a0(calcs[name])                # the published run made them here, before any band
+    print(f"{name:13s} relaxed a0 = {a:.4f} Å")
 log = mr.results("fig4", "bands", f"opt_{first}-{last}.log")
 open(log, "w").close()
 
