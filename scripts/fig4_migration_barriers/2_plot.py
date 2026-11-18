@@ -51,10 +51,10 @@ for ax, defect, tag in zip(axes[0], DEFECTS, "abcd"):
         x, M = get("frac"), 1e3 * get("rel_relaxed")
         if len(M):
             ax.fill_between(x, M.min(0), M.max(0), color=COL[name], alpha=0.12, lw=0)
-            ax.fill_between(x, M.mean(0) - M.std(0), M.mean(0) + M.std(0), color=COL[name], alpha=0.3, lw=0)
+            # ax.fill_between(x, M.mean(0) - M.std(0), M.mean(0) + M.std(0), color=COL[name], alpha=0.3, lw=0)
         b = 1e3 * get("barrier_relaxed")
         ax.plot(x, 1e3 * get("rel_mean"), "-o", color=COL[name], ms=3.5, lw=1.5,
-                label=f"{LABEL[name]}: {1e3 * float(get('barrier')):.0f} ± {b.std() if len(b) else 0:.0f} meV")
+                label=f"{LABEL[name]}: {1e3 * float(get('barrier')):.0f} meV") # ± {b.std() if len(b) else 0:.0f} meV")
         print(f"{defect:12s} {LABEL[name]:11s} mean model {1e3 * float(get('barrier')):6.1f} meV, members {b.mean():6.1f} ± {b.std():.1f} meV (n = {len(b)})")
     ax.axhline(0, color="k", lw=0.6, ls="--")
     ax.set_xlim(0, 1)
